@@ -1,0 +1,6 @@
+{
+  "best_train_accuracy": 0.9728124737739563,
+  "best_val_accuracy": 0.9806249737739563,
+  "epochs_trained": 7,
+  "model_path": "C:\\Users\\Hossam\\Desktop\\theLastOne\\Neural Networks\\Assignment1\\outputs\\best_model.keras"
+}

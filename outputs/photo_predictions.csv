@@ -1,0 +1,2 @@
+filename,predicted_label,dog_probability,confidence,saved_image
+2.jpg,dog,0.999477207660675,0.999477207660675,outputs\photo_predictions\2_pred.png

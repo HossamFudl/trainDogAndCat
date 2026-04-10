@@ -134,6 +134,64 @@ def predict_test_set(model, test_dir: Path, output_dir: Path, image_size=(224, 2
     return submission_path
 
 
+def collect_photo_paths(photos_input: Path):
+    if photos_input.is_file():
+        return [photos_input]
+    if photos_input.is_dir():
+        valid_ext = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+        return sorted([p for p in photos_input.iterdir() if p.suffix.lower() in valid_ext])
+    return []
+
+
+def predict_and_save_photos(model, photos_input: Path, output_dir: Path, image_size=(224, 224)):
+    photo_paths = collect_photo_paths(photos_input)
+    if not photo_paths:
+        print(f"No valid photos found in: {photos_input}")
+        return None
+
+    photos_output_dir = output_dir / "photo_predictions"
+    photos_output_dir.mkdir(parents=True, exist_ok=True)
+    photos_csv_path = output_dir / "photo_predictions.csv"
+
+    rows = []
+    for photo_path in photo_paths:
+        img = tf.keras.utils.load_img(photo_path, target_size=image_size)
+        x = tf.keras.utils.img_to_array(img)
+        x = np.expand_dims(x, axis=0)
+        x = preprocess_input(x)
+
+        pred = float(model.predict(x, verbose=0)[0][0])
+        label = "dog" if pred >= 0.5 else "cat"
+        confidence = pred if label == "dog" else 1.0 - pred
+
+        original = tf.keras.utils.load_img(photo_path)
+        original_arr = tf.keras.utils.img_to_array(original).astype(np.uint8)
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        ax.imshow(original_arr)
+        ax.axis("off")
+        ax.set_title(f"Prediction: {label} ({confidence * 100:.2f}%)")
+        save_path = photos_output_dir / f"{photo_path.stem}_pred.png"
+        fig.savefig(save_path, dpi=150, bbox_inches="tight", pad_inches=0.2)
+        plt.close(fig)
+
+        rows.append([photo_path.name, label, pred, confidence, str(save_path)])
+
+    with photos_csv_path.open("w", newline="", encoding="utf-8") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["filename", "predicted_label", "dog_probability", "confidence", "saved_image"])
+        writer.writerows(rows)
+
+    return photos_csv_path
+
+
+def prompt_for_photo_input():
+    user_input = input("Enter photo path (or press Enter to exit): ").strip()
+    if not user_input:
+        return None
+    return Path(user_input)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Dogs vs Cats CNN trainer")
     parser.add_argument("--train_dir", type=str, default="train", help="Path to train folder")
@@ -155,6 +213,17 @@ def main():
         "--force_retrain",
         action="store_true",
         help="Retrain even if outputs/best_model.keras already exists",
+    )
+    parser.add_argument(
+        "--photos_input",
+        type=str,
+        default=None,
+        help="Path to one photo file or a folder of photos to predict and save in output_dir",
+    )
+    parser.add_argument(
+        "--run_test_set",
+        action="store_true",
+        help="Run prediction on test_dir and create submission.csv",
     )
     args = parser.parse_args()
 
@@ -283,16 +352,34 @@ def main():
         best_val_acc = write_summary(model, history, output_dir)
         prediction_size = (args.img_size, args.img_size)
 
-    submission_path = predict_test_set(
-        model,
-        test_dir,
-        output_dir,
-        image_size=prediction_size,
-        batch_size=max(64, args.batch_size),
-    )
+    submission_path = None
+    if args.run_test_set:
+        submission_path = predict_test_set(
+            model,
+            test_dir,
+            output_dir,
+            image_size=prediction_size,
+            batch_size=max(64, args.batch_size),
+        )
+
+    photo_predictions_path = None
+    photos_input_path = Path(args.photos_input) if args.photos_input else prompt_for_photo_input()
+    if photos_input_path is not None:
+        photo_predictions_path = predict_and_save_photos(
+            model,
+            photos_input_path,
+            output_dir,
+            image_size=prediction_size,
+        )
 
     print(f"\nBest validation accuracy: {best_val_acc * 100:.2f}%")
-    print(f"Submission file saved to: {submission_path}")
+    if submission_path is not None:
+        print(f"Submission file saved to: {submission_path}")
+    if photo_predictions_path is not None:
+        print(f"Photo predictions saved to: {photo_predictions_path}")
+        print(f"Labeled photos saved in: {(output_dir / 'photo_predictions').resolve()}")
+    else:
+        print("No photo provided. Exiting without photo prediction.")
     print(f"All outputs saved in: {output_dir.resolve()}")
     if best_val_acc >= 0.8:
         print("Target achieved: Validation accuracy is >= 80%.")
